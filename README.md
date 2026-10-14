@@ -4,7 +4,7 @@
 vibe-coding platform that you own, and get back a real, self-hostable repo —
 yours, not the platform's.
 
-🎬 [Watch the demo](https://tamtunnel.github.io/unvibe/#video) · 📖 [Demo site](https://tamtunnel.github.io/unvibe/)
+🎬 [Watch the demo](https://tamtunnel.github.io/Unvibe/#video) · 📖 [Demo site](https://tamtunnel.github.io/Unvibe/)
 
 ## The problem
 
