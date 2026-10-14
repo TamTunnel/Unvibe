@@ -79,3 +79,26 @@ describe('DRM / circumvention refusal', () => {
     expect(a.method).toBe('flag');
   });
 });
+
+describe('circumvention denylist normalization (Judge #4)', () => {
+  it('refuses percent-encoded and double-encoded variants', async () => {
+    for (const url of [
+      'https://x.lovable.app/drm%2dcrack-tool',
+      'https://x.lovable.app/drm%252dcrack-tool', // double-encoded
+      'https://x.lovable.app/DRM_CRACK', // case + separator variants
+      'https://x.lovable.app/drm.crack.tool',
+      'https://x.lovable.app/paywall%5Fbypass',
+      'https://x.lovable.app/keygen',
+    ]) {
+      await expect(enforceOwnershipGate({ iOwnThis: true, url }))
+        .rejects.toThrow(/circumvention/i);
+    }
+  });
+
+  it('does not refuse ordinary targets (denylist is narrow)', async () => {
+    // Honest scope: an ordinary-looking URL passes — the denylist cannot
+    // detect DRM-protected content behind an innocuous URL.
+    const a = await enforceOwnershipGate({ iOwnThis: true, url: 'https://netflix-clone-paywall.lovable.app' });
+    expect(a.method).toBe('flag');
+  });
+});

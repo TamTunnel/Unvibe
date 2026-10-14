@@ -10,6 +10,7 @@
 import {
   buildRegenPrompt, scanOutputForBundleLeak, PROMPT_PACK_VERSION,
 } from './prompts.js';
+import { routeToPageFile } from './route-naming.js';
 import type { LlmClient } from './llm.js';
 import type { UnvibeSpec } from './spec.js';
 
@@ -34,18 +35,28 @@ export interface RegenerateResult {
   generatedByModel: string[];
   /** Verbatim-leak scan findings (empty = clean). */
   leakFindings: { file: string; chunkLength: number }[];
+  /** True when no bundle text was available so the leak scan could not run. */
+  leakScanSkipped: boolean;
 }
 
-function routeToFile(path: string): string {
-  const slug = path.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'home';
-  return `src/pages/${slug}.tsx`;
-}
+export { routeToPageFile } from './route-naming.js';
 
-/** Strip accidental markdown fences — the model is told not to, but be lenient. */
+/**
+ * Strip accidental markdown fences AND leading model preamble — the model is
+ * told to output only file content, but be lenient: drop any leading prose
+ * lines before the first code-looking line.
+ */
 function unfence(text: string): string {
   const t = text.trim();
   const m = t.match(/^```(?:tsx|ts|typescript|jsx)?\n([\s\S]*?)\n```$/);
-  return m ? m[1] : t;
+  if (m) return m[1];
+  const lines = t.split('\n');
+  let start = 0;
+  if (/^```/.test(lines[0] ?? '')) start = 1; // unclosed fence: drop the fence line
+  const codeLine =
+    /^\s*(import|export|declare|const|let|var|function|class|interface|type|enum|\/\*|\/\/|@|<|['"])/;
+  while (start < lines.length && !codeLine.test(lines[start])) start++;
+  return lines.slice(start).join('\n').trim();
 }
 
 export async function regenerateFromSpec(opts: RegenerateOptions): Promise<RegenerateResult> {
@@ -67,7 +78,7 @@ export async function regenerateFromSpec(opts: RegenerateOptions): Promise<Regen
 
   // One page component per route.
   for (const route of opts.spec.routes) {
-    await generate(routeToFile(route.path), 'route-page', route.path);
+    await generate(routeToPageFile(route.path), 'route-page', route.path);
   }
   // Typed API client (only if endpoints were observed).
   if (opts.spec.endpoints.length > 0) {
@@ -79,7 +90,10 @@ export async function regenerateFromSpec(opts: RegenerateOptions): Promise<Regen
   }
 
   // Post-hoc clean-room scan. Bundle text is used ONLY here — never in prompts.
+  // This is a tripwire, not a guarantee: it catches verbatim copies, not
+  // paraphrases. A skipped scan (no bundle text) is reported, never silent.
   let leakFindings: { file: string; chunkLength: number }[] = [];
+  const leakScanSkipped = !opts.bundleTextForLeakScan;
   if (opts.bundleTextForLeakScan) {
     const generated: Record<string, string> = {};
     for (const f of generatedByModel) generated[f] = files[f];
@@ -89,5 +103,5 @@ export async function regenerateFromSpec(opts: RegenerateOptions): Promise<Regen
     }
   }
 
-  return { files, promptsVersion: PROMPT_PACK_VERSION, generatedByModel, leakFindings };
+  return { files, promptsVersion: PROMPT_PACK_VERSION, generatedByModel, leakFindings, leakScanSkipped };
 }

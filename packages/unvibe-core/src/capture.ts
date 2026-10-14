@@ -10,7 +10,113 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { chromium, type Browser, type Page, type Response } from 'playwright';
+
+/**
+ * Thrown when the crawler refuses to follow a navigation because it would
+ * leave the target origin or reach a private/metadata IP. The offending
+ * request is aborted before any bytes leave the machine.
+ */
+export class EgressBlockedError extends Error {
+  readonly code = 'EGRESS_BLOCKED';
+  constructor(message: string) {
+    super(message);
+    this.name = 'EgressBlockedError';
+  }
+}
+
+/**
+ * IP ranges that must never be reached through a redirect hop: loopback,
+ * RFC-1918 private, link-local (cloud metadata endpoints live here),
+ * carrier-grade NAT, and IPv6 equivalents.
+ */
+function isBlockedIp(ip: string): boolean {
+  if (isIP(ip) === 4) {
+    const [a, b] = ip.split('.').map(Number);
+    return (
+      a === 127 || // 127.0.0.0/8 loopback
+      a === 10 || // 10.0.0.0/8
+      (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+      (a === 192 && b === 168) || // 192.168.0.0/16
+      (a === 169 && b === 254) || // 169.254.0.0/16 (incl. 169.254.169.254 metadata)
+      (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 (incl. 100.100.100.100)
+      a === 0 // 0.0.0.0/8
+    );
+  }
+  if (isIP(ip) === 6) {
+    const n = ip.toLowerCase();
+    // Strip a possible IPv4-mapped tail and check the v4 part too.
+    const mapped = n.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped && isBlockedIp(mapped[1])) return true;
+    return (
+      n === '::1' || // loopback
+      n.startsWith('fe80:') || // fe80::/10 link-local
+      n.startsWith('fc') || n.startsWith('fd') // fc00::/7 unique-local
+    );
+  }
+  return false;
+}
+
+const dnsCache = new Map<string, string[]>();
+
+/**
+ * Validate a single egress hop. Throws EgressBlockedError when the hop:
+ *  - is not http(s),
+ *  - leaves the target origin (cross-origin redirect — the SSRF vector), or
+ *  - resolves (via literal or DNS) to a blocked private/metadata IP while
+ *    pointing at a host OTHER than the explicitly targeted one.
+ *
+ * The explicitly targeted initial host is always allowed — the product gate
+ * (gate.ts) already scope-checked it, and tests target localhost. Every
+ * *redirect hop* to a different host is untrusted until proven public.
+ */
+export async function assertEgressAllowed(
+  requestUrl: string,
+  allowedOrigin: string,
+  initialHost: string,
+): Promise<void> {
+  let u: URL;
+  try {
+    u = new URL(requestUrl);
+  } catch {
+    throw new EgressBlockedError(`blocked: not a valid URL: ${requestUrl}`);
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+    // data:/blob: subresources never leave the document — safe to allow.
+    if (u.protocol === 'data:' || u.protocol === 'blob:') return;
+    throw new EgressBlockedError(`blocked: non-HTTP(S) egress to ${u.protocol}//${u.host}`);
+  }
+  if (u.origin !== allowedOrigin) {
+    throw new EgressBlockedError(
+      `blocked: redirect escapes target origin ${allowedOrigin} → ${u.origin}`,
+    );
+  }
+  const host = u.hostname.toLowerCase();
+  if (host === initialHost.toLowerCase()) return; // the explicit target; gate-scoped
+  if (isIP(host) !== 0) {
+    if (isBlockedIp(host)) {
+      throw new EgressBlockedError(`blocked: redirect hop resolves to private/metadata IP ${host}`);
+    }
+    return;
+  }
+  let addrs = dnsCache.get(host);
+  if (!addrs) {
+    try {
+      addrs = (await dnsLookup(host, { all: true })).map((a) => a.address);
+    } catch {
+      addrs = [];
+    }
+    dnsCache.set(host, addrs);
+  }
+  const bad = addrs.filter(isBlockedIp);
+  if (bad.length > 0) {
+    throw new EgressBlockedError(
+      `blocked: redirect hop ${host} resolves to private/metadata IP(s): ${bad.join(', ')}`,
+    );
+  }
+}
 
 export interface CaptureOptions {
   url: string;
@@ -41,12 +147,23 @@ export interface CaptureResult {
   screenshotsDir: string; // relative
   scriptsDir: string; // relative — downloaded JS for the REA adapter
   requestCount: number;
+  /** Request URLs observed per route path (for endpoint→route attribution). */
+  routeRequests: Record<string, string[]>;
 }
 
 const ASSET_EXTS = new Set(['.js', '.mjs', '.css', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.woff', '.woff2', '.ttf', '.mp4', '.webm', '.ico', '.json']);
 
-function routeKey(u: URL): string {
-  return u.pathname + (u.search ? `?${u.searchParams.toString()}` : '');
+/** Query params that identify the visitor, not the page — stripped so tracking variants don't multiply routes. */
+const TRACKING_PARAMS = new Set([
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id',
+  'gclid', 'fbclid', 'msclkid', 'mc_cid', 'mc_eid', '_ga', 'yclid', 'igshid',
+]);
+
+export function routeKey(u: URL): string {
+  const params = new URLSearchParams(u.search);
+  for (const p of TRACKING_PARAMS) params.delete(p);
+  const q = params.toString();
+  return u.pathname + (q ? `?${q}` : '');
 }
 
 async function parseCookieOption(cookie: string | undefined, origin: string): Promise<{ name: string; value: string; domain: string; path: string }[]> {
@@ -86,6 +203,14 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
   } = opts;
   const log = onProgress ?? (() => {});
   const target = new URL(url);
+  // B2: captureSite refuses non-HTTP(S) schemes outright. Playwright would
+  // happily load file:///etc/passwd into screenshots and DOM sidecars.
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    throw new EgressBlockedError(
+      `capture refused: non-HTTP(S) URL scheme "${target.protocol}". ` +
+        'Unvibe captures live web apps only.',
+    );
+  }
   const origin = target.origin;
 
   const absOut = outDir;
@@ -101,8 +226,41 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
     const context = await browser.newContext({
       viewport,
       recordHar: { path: harPath },
-      ...(cookies.length ? { storageState: undefined } : {}),
     });
+    // SSRF guard: validate EVERY request hop (initial + redirects + subresources).
+    // checkTargetScope (gate.ts) only saw the initial URL. Playwright's
+    // context.route() does NOT reliably see navigation redirects that the
+    // browser follows internally (verified empirically: a 302 to 127.0.0.1
+    // bypassed routing and hit the internal server). The CDP Fetch domain
+    // intercepts at the network layer, so every hop — including redirects —
+    // is validated before any bytes leave the machine.
+    //
+    // Per-page helper: installs the Fetch interceptor, returns a getter for
+    // the first blocked navigation URL (null when none was blocked).
+    const installEgressGuard = async (page: Page): Promise<() => string | null> => {
+      let blockedNavigationUrl: string | null = null;
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*' }] });
+      cdp.on('Fetch.requestPaused', (event: { requestId: string; request: { url: string }; resourceType?: string }) => {
+        const url = event.request.url;
+        void (async () => {
+          try {
+            await assertEgressAllowed(url, origin, target.hostname);
+            await cdp.send('Fetch.continueRequest', { requestId: event.requestId });
+          } catch (e) {
+            if (event.resourceType === 'Document' && blockedNavigationUrl === null) {
+              blockedNavigationUrl = url;
+            }
+            log(`capture: BLOCKED egress to ${url} (${(e as Error).message})`);
+            await cdp.send('Fetch.failRequest', {
+              requestId: event.requestId,
+              errorReason: 'BlockedByClient',
+            }).catch(() => {});
+          }
+        })();
+      });
+      return () => blockedNavigationUrl;
+    };
     if (cookies.length) {
       await context.addCookies(cookies.map((c) => ({ ...c, sameSite: 'Lax' as const, secure: target.protocol === 'https:' })));
       log(`capture: added ${cookies.length} session cookie(s)`);
@@ -111,6 +269,7 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
     const seen = new Set<string>();
     const queue: { path: string; depth: number }[] = [{ path: routeKey(target) || '/', depth: 0 }];
     const routes: CapturedRoute[] = [];
+    const routeRequestMap = new Map<string, string[]>();
     let requestCount = 0;
     let assetIndex = 0;
 
@@ -143,13 +302,60 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
       const pageUrl = origin + path;
       log(`capture: visiting ${path} (depth ${depth})`);
       const page: Page = await context.newPage();
+      const getBlockedNavigationUrl = await installEgressGuard(page).catch((e) => {
+        log(`capture: WARN could not install egress guard: ${(e as Error).message.split('\n')[0]}`);
+        return () => null as string | null;
+      });
+      // M3: attribute requests to the route being visited (endpoint→route).
+      const pageRequests: string[] = [];
+      page.on('request', (req) => {
+        pageRequests.push(req.url());
+      });
+      const pendingDownloads: Promise<void>[] = [];
       page.on('response', (res) => {
-        void downloadAsset(res);
+        pendingDownloads.push(downloadAsset(res));
       });
       try {
-        await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: timeoutMs });
+        // Belt-and-braces: validate the initial URL too (captureSite is public API).
+        await assertEgressAllowed(pageUrl, origin, target.hostname);
+        // M7: domcontentloaded + a short settle delay instead of networkidle.
+        // networkidle can silently drop SPA routes when a long-poll/stream
+        // keeps the network busy past the timeout; we record the route even
+        // when full idle times out.
+        try {
+          await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+        } catch (gotoErr) {
+          if (getBlockedNavigationUrl()) throw gotoErr;
+          log(`capture: WARN ${path} did not reach idle in ${timeoutMs}ms — recording partial route`);
+        }
+        await page.waitForTimeout(1500).catch(() => {});
       } catch (e) {
+        await page.close().catch(() => {});
+        const blocked = getBlockedNavigationUrl();
+        if (blocked) {
+          // The navigation was refused by the SSRF guard — fail the capture
+          // loudly rather than recording an empty route set.
+          throw new EgressBlockedError(
+            `capture refused: navigation to ${blocked} was blocked ` +
+              `(target origin: ${origin}). A redirect tried to leave the target origin ` +
+              `or reach a private/metadata IP.`,
+          );
+        }
         log(`capture: WARN could not load ${path}: ${(e as Error).message.split('\n')[0]}`);
+        continue;
+      }
+      // M10: after goto, the landed URL must still be inside the target
+      // origin. Belt-and-braces alongside per-hop interception: if the page
+      // somehow ended up cross-origin (e.g. a client-side/meta redirect the
+      // interceptor didn't see), refuse the route instead of capturing it.
+      let landedOrigin: string;
+      try {
+        landedOrigin = new URL(page.url()).origin;
+      } catch {
+        landedOrigin = '';
+      }
+      if (landedOrigin !== origin) {
+        log(`capture: BLOCKED route ${path} — landed cross-origin at ${page.url()}; skipping`);
         await page.close().catch(() => {});
         continue;
       }
@@ -217,6 +423,10 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
         outgoingLinks: [...new Set(outgoing)],
         htmlBytes: html.length,
       });
+      routeRequestMap.set(path, [...new Set(pageRequests)]);
+      // m7: await in-flight asset downloads before closing the page, so the
+      // scripts/assets inventory isn't racy against browser shutdown.
+      await Promise.allSettled(pendingDownloads);
       await page.close().catch(() => {});
     }
 
@@ -231,6 +441,7 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
       screenshotsDir: rel(screenshotsDir),
       scriptsDir: rel(scriptsDir),
       requestCount,
+      routeRequests: Object.fromEntries(routeRequestMap),
     };
     await writeFile(join(absOut, 'routes.json'), JSON.stringify(routes, null, 2));
     log(`capture: done — ${routes.length} routes, ${requestCount} asset responses`);

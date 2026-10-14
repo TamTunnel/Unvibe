@@ -2,10 +2,20 @@
  * REA adapter — REA is the eyes, not the hands.
  *
  * A thin, swappable interface for static bundle inventory and HAR analysis.
- * The default implementation shells out to the `rea-agents` npm package
- * (pinned version, MIT). When REA is unavailable or a command's surface
- * doesn't fit Unvibe's deterministic capture, the adapter degrades
- * gracefully to a local static scanner — analysis never hard-fails.
+ *
+ * HONEST RESOLUTION (m1): the "pinned" rea-agents version is real — it is an
+ * `optionalDependency` of @tamtunnel/unvibe-core (see package.json). When it
+ * is installed, the pinned local binary runs. When it is NOT installed, the
+ * adapter falls back to `npx -y rea-agents@<pinned>` — which fetches and
+ * executes remote code — and logs an explicit warning saying so. Set
+ * UNVIBE_REA_NO_NPX=1 to disable the npx fallback entirely (the local static
+ * scanner is then the only engine).
+ *
+ * When REA is unavailable or a command's surface doesn't fit Unvibe's
+ * deterministic capture, the adapter degrades gracefully to the local static
+ * scanner — analysis never hard-fails. The local scanner is the fallback
+ * backbone and the only path exercised by the test suite (the REA auto path
+ * needs the rea-agents binary; see the degradation test).
  *
  * Adaptation notes (honest, recorded):
  * - `analyze-web-bundle` / `export-web-scripts` require a live CDP session
@@ -18,14 +28,33 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { join, extname, dirname } from 'node:path';
 
 const execFileAsync = promisify(execFile);
 
-/** Pinned rea-agents version (MIT). Update deliberately, not on every run. */
+/** Pinned rea-agents version (MIT). Update deliberately, not on every run. Also pinned in optionalDependencies. */
 export const REA_PINNED_VERSION = '6.4.0';
 const REA_NPX_SPEC = `rea-agents@${REA_PINNED_VERSION}`;
+
+/**
+ * Resolve the locally installed rea-agents binary (optionalDependency),
+ * or null when it isn't installed.
+ */
+export function localReaBin(): string | null {
+  try {
+    const req = createRequire(import.meta.url);
+    const pkgPath = req.resolve('rea-agents/package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { bin?: string | Record<string, string> };
+    const binRel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.['rea-agents'];
+    if (binRel) return join(dirname(pkgPath), binRel);
+  } catch {
+    /* not installed */
+  }
+  return null;
+}
 
 /** Static inventory of downloaded bundle scripts. No source text included. */
 export interface BundleInventory {
@@ -62,10 +91,30 @@ export interface ReaAdapter {
 
 /** Run a rea-agents CLI command, returning parsed JSON lines (progress filtered). */
 async function runRea(args: string[], timeoutMs: number): Promise<unknown[]> {
-  const { stdout } = await execFileAsync('npx', ['-y', REA_NPX_SPEC, ...args], {
-    timeout: timeoutMs,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  let stdout: string;
+  const local = localReaBin();
+  if (local) {
+    ({ stdout } = await execFileAsync(process.execPath, [local, ...args], {
+      timeout: timeoutMs,
+      maxBuffer: 64 * 1024 * 1024,
+    }));
+  } else {
+    if (process.env.UNVIBE_REA_NO_NPX === '1') {
+      throw new Error(
+        'rea-agents is not installed and UNVIBE_REA_NO_NPX=1 disables the npx fallback. ' +
+          'Install the optionalDependency, or unset UNVIBE_REA_NO_NPX to allow `npx -y`.',
+      );
+    }
+    console.warn(
+      `unvibe: rea-agents@${REA_PINNED_VERSION} is not installed locally — ` +
+        'fetching via `npx -y` (this executes remotely-fetched code). ' +
+        'Install the optionalDependency to avoid this, or set UNVIBE_REA_NO_NPX=1 to disable the fallback.',
+    );
+    ({ stdout } = await execFileAsync('npx', ['-y', REA_NPX_SPEC, ...args], {
+      timeout: timeoutMs,
+      maxBuffer: 64 * 1024 * 1024,
+    }));
+  }
   const docs: unknown[] = [];
   for (const line of stdout.split('\n')) {
     const t = line.trim();

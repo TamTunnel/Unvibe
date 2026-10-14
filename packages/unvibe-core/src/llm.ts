@@ -117,7 +117,10 @@ export class AnthropicClient implements LlmClient {
 export class MockLlmClient implements LlmClient {
   readonly provider: LlmProvider = 'mock';
   readonly model = 'mock-spec-codegen-v1';
+  /** Every prompt this instance was asked to complete (test introspection). */
+  readonly requests: LlmMessage[][] = [];
   async complete(messages: LlmMessage[]): Promise<string> {
+    this.requests.push(messages);
     const user = messages.filter((m) => m.role === 'user').map((m) => m.content).join('\n');
     const m = user.match(/```spec-json\n([\s\S]*?)```/);
     if (!m) {
@@ -162,7 +165,7 @@ function renderFromSpec(
     const fns = (spec.endpoints ?? [])
       .map((e) => {
         const fn = 'call' + pascal(e.id.replace(/[^a-zA-Z0-9]+/g, '-'));
-        return `export async function ${fn}(params: Record<string, string | number> = {}): Promise<unknown> {\n  return apiRequest("${e.method}", "${e.urlPattern}", params);\n}`;
+        return `export async function ${fn}(params: Record<string, string | number> = {}, body?: unknown): Promise<unknown> {\n  return apiRequest("${e.method}", "${e.urlPattern}", params, body);\n}`;
       })
       .join('\n\n');
     return `${header}import { apiRequest } from "./http";\n\n${fns || '// no endpoints observed in spec'}\n`;
@@ -174,8 +177,11 @@ function renderFromSpec(
     const blocks = (route.components ?? [])
       .map((c) => {
         const cls = c.kind === 'hero' ? 'hero' : c.kind === 'navbar' ? 'navbar' : c.kind;
+        // The mock respects <untrusted-data> delimiters as data boundaries:
+        // strip them and render the (neutralized) text they wrap.
+        const cleanText = (c.text ?? '').replace(/<\/?untrusted-data>/g, '');
         // DOM inventory joins observed text samples with " | " — split them back out.
-        const segments = (c.text ?? c.name).split(/\s*\|\|?\s*/).map((s) => s.replace(/</g, '&lt;').trim()).filter(Boolean).slice(0, 12);
+        const segments = (cleanText || c.name).split(/\s*\|\|?\s*/).map((s) => s.replace(/</g, '&lt;').trim()).filter(Boolean).slice(0, 12);
         const label = c.name.replace(/"/g, '');
         const renderSeg = (inner: string): string => {
           if (c.kind === 'button') return `      <button className="btn">${inner}</button>`;

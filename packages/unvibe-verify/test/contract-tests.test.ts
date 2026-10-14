@@ -57,6 +57,9 @@ describe('contractTests (static layer)', () => {
       <Route path="/" element={<HomePage />} />
       <Route path="/about" element={<AboutPage />} />
     `);
+    await mkdir(join(dir, 'src/pages'), { recursive: true });
+    await writeFile(join(dir, 'src/pages/home.tsx'), `export default function HomePage() { return <main><h1>Home</h1></main>; }`);
+    await writeFile(join(dir, 'src/pages/about.tsx'), `export default function AboutPage() { return <main><h1>About</h1></main>; }`);
     const r = await contractTests({ spec: spec(), outputDir: dir, onProgress: () => {} });
     expect(r.checks.length).toBeGreaterThan(0);
     expect(r.pass).toBe(true);
@@ -68,17 +71,23 @@ describe('contractTests (static layer)', () => {
     await writeFile(join(dir, 'src/lib/api.ts'), `export async function unrelated() { return 1; }`);
     await writeFile(join(dir, 'src/types.ts'), `export interface Project { id: string; name: string; }`);
     await writeFile(join(dir, 'src/App.tsx'), `<Route path="/" element={<HomePage />} /><Route path="/about" element={<AboutPage />} />`);
+    await mkdir(join(dir, 'src/pages'), { recursive: true });
+    await writeFile(join(dir, 'src/pages/home.tsx'), `export default function HomePage() { return <main><h1>Home</h1></main>; }`);
+    await writeFile(join(dir, 'src/pages/about.tsx'), `export default function AboutPage() { return <main><h1>About</h1></main>; }`);
     const r = await contractTests({ spec: spec(), outputDir: dir, onProgress: () => {} });
     expect(r.pass).toBe(false);
     expect(r.checks.some((c) => !c.pass && c.name.includes('/api/projects'))).toBe(true);
   });
 
-  it('fails when a route is not wired in App.tsx', async () => {
+  it('fails when a route has no generated page (not the scaffold App.tsx)', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'unvibe-contracts-'));
     await mkdir(join(dir, 'src/lib'), { recursive: true });
     await writeFile(join(dir, 'src/lib/api.ts'), `apiRequest("GET", "/api/projects", {})`);
     await writeFile(join(dir, 'src/types.ts'), `export interface Project { id: string; name: string; }`);
     await writeFile(join(dir, 'src/App.tsx'), `<Route path="/" element={<HomePage />} />`);
+    await mkdir(join(dir, 'src/pages'), { recursive: true });
+    await writeFile(join(dir, 'src/pages/home.tsx'), `export default function HomePage() { return <main><h1>Home</h1></main>; }`);
+    // NOTE: src/App.tsx still wires /about (scaffold), but no GENERATED page exists → must fail.
     const r = await contractTests({ spec: spec(), outputDir: dir, onProgress: () => {} });
     expect(r.pass).toBe(false);
     expect(r.checks.some((c) => !c.pass && c.name.includes('/about'))).toBe(true);

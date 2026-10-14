@@ -20,6 +20,7 @@ describe('pipeline e2e (fixture app, mock LLM)', () => {
   let port = 0;
 
   beforeAll(async () => {
+    process.env.UNVIBE_ALLOW_LOCALHOST = '1';
     proc = spawn('node', [FIXTURE.pathname], { stdio: 'pipe' });
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('fixture app did not start')), 15000);
@@ -34,6 +35,7 @@ describe('pipeline e2e (fixture app, mock LLM)', () => {
 
   afterAll(async () => {
     proc?.kill('SIGTERM');
+    delete process.env.UNVIBE_ALLOW_LOCALHOST;
   });
 
   it('runs capture → analyze → regenerate and produces an honest output repo', async () => {

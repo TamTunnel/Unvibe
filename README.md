@@ -74,20 +74,29 @@ inspect or re-run each step; see `npx unvibe --help`.
 
 Unvibe **only processes apps you own**. Every command requires
 `--i-own-this`, or an interactive attestation prompt on a TTY. Without one
-it refuses. Targets shaped like DRM/circumvention tooling are refused
-outright. This is enforced in code (`packages/unvibe-cli/src/gate.ts`),
-with tests.
+it refuses. Targets whose URLs are shaped like DRM/circumvention tooling
+are refused outright. This is enforced in code
+(`packages/unvibe-core/src/gate.ts`, called from the pipeline itself — the
+CLI is only the UX layer), with tests.
+
+**Honest limits of the circumvention gate:** it is a URL-shape denylist. It
+refuses obvious cases (`drm-crack`, `keygen`, `paywall-bypass`, …,
+percent-encoded variants included) but it *cannot* detect a DRM-protected
+app behind an ordinary-looking URL — `netflix-clone-paywall.lovable.app`
+passes and always will. Ownership attestation is the real control; the
+denylist is a tripwire, not a guarantee.
 
 ## v1 scope — stated honestly
 
 | In scope | Out of scope (documented, not attempted) |
 |---|---|
 | Lovable (`*.lovable.app`) targets | Next.js output templates |
-| Live-URL capture (primary input) | Base44's proprietary entity backend |
-| Exported/GitHub-synced bundles (secondary input) | SSR apps |
-| Vite + React output mirroring the source stack | Payment-flow reconstruction beyond stubs |
-| Self-hosted Supabase backend via docker-compose | Pixel-perfect UI |
-| Auth-provider detection + migration runbook | Replit mixed environments |
+| Live-URL capture (the only input in v1) | Exported/GitHub-synced bundle ingestion (not implemented) |
+| Vite + React output mirroring the source stack | Base44's proprietary entity backend |
+| Self-hosted Postgres via docker-compose (Postgres + PostgREST only — not the full Supabase stack) | SSR apps |
+| Auth-provider detection + migration runbook | Payment-flow reconstruction beyond stubs |
+| | Pixel-perfect UI |
+| | Replit mixed environments |
 
 **Fidelity promise:** same routes, same data, same flows — verified by
 screenshot-diff and contract tests. Pixel-perfect UI is explicitly out;
@@ -146,9 +155,8 @@ When REA is unavailable, a local static scanner takes over gracefully.
 ## FAQs
 
 **Do I need the platform's cooperation?**
-No — v1's primary input is the live URL. A session cookie unlocks authed
-routes. If the platform offers an export/GitHub sync, Unvibe can use the
-bundle as a secondary input.
+No — v1's only input is the live URL. A session cookie unlocks authed
+routes. (Bundle-export ingestion is not implemented; capture is live-URL only.)
 
 **Will the rebuild look exactly like my app?**
 It will have the same routes, content, and behavior. It will not be
@@ -173,14 +181,17 @@ mock` for fully deterministic offline codegen (used by the test suite).
 
 **Is this a circumvention tool?**
 No. It rebuilds apps you own from their observable behavior, refuses
-DRM/circumvention-shaped targets, and requires ownership attestation.
+circumvention-shaped target URLs, and requires ownership attestation.
+Note the honest limit: the URL denylist cannot detect DRM-protected
+content behind an ordinary-looking URL — ownership attestation is the
+real control.
 
 ## Development
 
 ```bash
 npm install
 npm run build      # tsc -b across packages
-npm test           # 60 tests across all packages
+npm test           # 129 tests across all packages
 npm run typecheck
 ```
 

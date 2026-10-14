@@ -44,3 +44,12 @@ describe('comparePng', () => {
     expect(back.width).toBe(32);
   });
 });
+
+describe('comparePng size mismatch (M8)', () => {
+  it('throws instead of silently cropping', () => {
+    expect(() => comparePng(solid(64, 64, 0, 0, 0), solid(32, 32, 0, 0, 0)))
+      .toThrow(/size mismatch/);
+    expect(() => diffToPng(solid(64, 64, 0, 0, 0), solid(64, 32, 0, 0, 0)))
+      .toThrow(/size mismatch/);
+  });
+});

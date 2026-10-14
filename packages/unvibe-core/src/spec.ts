@@ -83,6 +83,8 @@ export const EntitySchema = z.object({
   /** Where the entity was observed. Entities are ONLY created from observed payloads. */
   source: z.enum(['har-payload', 'bundle-string']),
   evidence: z.array(z.string()).default([]), // e.g. "GET /api/projects → response[0]"
+  /** The endpoint this entity's shape was inferred from (M4: contract tests check the right shape). */
+  sourceEndpointId: z.string().optional(),
 });
 export type SpecEntity = z.infer<typeof EntitySchema>;
 
@@ -97,8 +99,6 @@ export type SpecAsset = z.infer<typeof AssetSchema>;
 export const AuthSchema = z.object({
   provider: z.enum(['supabase', 'clerk', 'firebase', 'auth0', 'none', 'unknown']),
   evidence: z.array(z.string()).default([]),
-  /** Client config with secrets REDACTED (keys replaced with ***REDACTED***). */
-  clientConfig: z.record(z.string(), z.string()).optional(),
 });
 export type SpecAuth = z.infer<typeof AuthSchema>;
 

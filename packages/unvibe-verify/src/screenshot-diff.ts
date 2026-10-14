@@ -52,27 +52,34 @@ async function loadPng(path: string): Promise<PNG> {
   return PNG.sync.read(buf);
 }
 
+/**
+ * M8: fail loudly on size mismatch instead of silently cropping. A rebuilt
+ * page that renders at a different size than the capture is a fidelity
+ * signal, not something to crop away — callers record this as a failed
+ * route with a note.
+ */
+function assertSameSize(a: PNG, b: PNG): void {
+  if (a.width !== b.width || a.height !== b.height) {
+    throw new Error(
+      `screenshot size mismatch: original ${a.width}x${a.height} vs rebuilt ${b.width}x${b.height}. ` +
+        'Not cropping — a size change is itself a fidelity failure.',
+    );
+  }
+}
+
 export function comparePng(a: PNG, b: PNG): number {
-  const width = Math.min(a.width, b.width);
-  const height = Math.min(a.height, b.height);
-  const da = new PNG({ width, height });
-  const db = new PNG({ width, height });
-  PNG.bitblt(a, da, 0, 0, width, height, 0, 0);
-  PNG.bitblt(b, db, 0, 0, width, height, 0, 0);
+  assertSameSize(a, b);
+  const { width, height } = a;
   const diff = new PNG({ width, height });
-  const changed = pixelmatch(da.data, db.data, diff.data, width, height, { threshold: 0.1 });
+  const changed = pixelmatch(a.data, b.data, diff.data, width, height, { threshold: 0.1 });
   return changed / (width * height);
 }
 
 export function diffToPng(a: PNG, b: PNG): Buffer {
-  const width = Math.min(a.width, b.width);
-  const height = Math.min(a.height, b.height);
-  const da = new PNG({ width, height });
-  const db = new PNG({ width, height });
-  PNG.bitblt(a, da, 0, 0, width, height, 0, 0);
-  PNG.bitblt(b, db, 0, 0, width, height, 0, 0);
+  assertSameSize(a, b);
+  const { width, height } = a;
   const diff = new PNG({ width, height });
-  pixelmatch(da.data, db.data, diff.data, width, height, { threshold: 0.1 });
+  pixelmatch(a.data, b.data, diff.data, width, height, { threshold: 0.1 });
   return PNG.sync.write(diff);
 }
 

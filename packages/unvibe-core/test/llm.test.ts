@@ -93,3 +93,18 @@ describe('MockLlmClient', () => {
     expect(out).toContain('stars: number');
   });
 });
+
+describe('mock api-client body forwarding (M5)', () => {
+  it('renders (params, body?) and passes body to apiRequest', async () => {
+    const c = new MockLlmClient();
+    const specJson = JSON.stringify({
+      kind: 'api-client',
+      endpoints: [{ id: 'ep-1', method: 'POST', urlPattern: '/api/contact' }],
+    });
+    const out = await c.complete([
+      { role: 'user', content: `TARGET-FILE: src/lib/api.ts\n\`\`\`spec-json\n${specJson}\n\`\`\`` },
+    ]);
+    expect(out).toContain('body?: unknown');
+    expect(out).toContain('apiRequest("POST", "/api/contact", params, body)');
+  });
+});

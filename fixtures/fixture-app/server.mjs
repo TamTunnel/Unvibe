@@ -51,7 +51,9 @@ ${extra}
 }
 
 const PROJECTS = [
-  { id: '11111111-1111-4111-8111-111111111111', name: 'Alpha', stars: 12, created_at: '2026-01-05T10:00:00Z', public: true },
+  // Synthetic canary secret (NOT real): exercises the analyze-stage secret
+  // redactor. It must never appear in the spec, prompts, or output repo.
+  { id: '11111111-1111-4111-8111-111111111111', name: 'Alpha', stars: 12, created_at: '2026-01-05T10:00:00Z', public: true, session_token: 'sk_test_CANARY_DO_NOT_USE_0000' },
   { id: '22222222-2222-4222-8222-222222222222', name: 'Beta', stars: 7, created_at: '2026-02-10T10:00:00Z', public: false },
 ];
 

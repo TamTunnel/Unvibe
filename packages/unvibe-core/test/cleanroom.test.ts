@@ -108,3 +108,29 @@ describe('clean-room boundary', () => {
     }
   });
 });
+
+describe('unfence strips model preamble (m12)', () => {
+  it('drops leading prose before the first code line', async () => {
+    const spec = testSpec();
+    const chatty = {
+      provider: 'mock' as const,
+      model: 'chatty',
+      complete: async () => [
+        'Here is the React component you asked for:',
+        'I wrote it from the behavioral spec.',
+        'export default function HomePage() {',
+        '  return <main><h1>Welcome home</h1></main>;',
+        '}',
+      ].join('\n'),
+    };
+    const result = await regenerateFromSpec({
+      spec,
+      llm: chatty,
+      scaffoldFiles: {},
+      onProgress: () => {},
+    });
+    const page = result.files['src/pages/home.tsx'];
+    expect(page).not.toContain('Here is the React component');
+    expect(page.startsWith('export default function HomePage()')).toBe(true);
+  });
+});

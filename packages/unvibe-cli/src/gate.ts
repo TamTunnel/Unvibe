@@ -1,72 +1,29 @@
 /**
- * Product gates — enforced in code, not just documented.
+ * CLI-side ownership UX: --i-own-this flag or the interactive YES prompt.
  *
- * 1. Ownership: Unvibe only processes apps the user owns. The CLI requires
- *    `--i-own-this`, or an interactive attestation prompt on a TTY.
- *    Non-interactive use without the flag is refused.
- * 2. v1 scope: only `*.lovable.app` targets (UNVIBE_ALLOW_LOCALHOST=1 lifts
- *    this for local development and tests — never for real targets).
- * 3. No DRM/circumvention targets: a narrow denylist of circumvention-shaped
- *    URL patterns is refused outright.
+ * The security boundary itself (scope checks, circumvention denylist,
+ * attestation validation) lives in @tamtunnel/unvibe-core/src/gate.ts so it
+ * holds for every pipeline caller, not just this CLI. This module is the UX
+ * layer that OBTAINS the attestation; pipeline.ts ENFORCES it.
  */
 import * as readline from 'node:readline';
+import {
+  checkCircumventionTarget,
+  checkTargetScope,
+  GateRefusal,
+} from '@tamtunnel/unvibe-core';
 
-export interface OwnershipAttestation {
-  attestedAt: string;
-  method: 'flag' | 'prompt';
-}
-
-export class GateRefusal extends Error {
-  readonly code = 'GATE_REFUSAL';
-  constructor(message: string) {
-    super(message);
-    this.name = 'GateRefusal';
-  }
-}
-
-/** Narrow denylist: URL patterns shaped like DRM/circumvention tooling. */
-const CIRCUMVENTION_PATTERNS: RegExp[] = [
-  /drm[-_ ]?crack/i,
-  /drm[-_ ]?removal/i,
-  /keygen/i,
-  /cheat[-_ ]?engine/i,
-  /paywall[-_ ]?bypass/i,
-  /widevine[-_ ]?(dump|decrypt)/i,
-];
-
-export function checkCircumventionTarget(url: string): void {
-  const hit = CIRCUMVENTION_PATTERNS.find((re) => re.test(url));
-  if (hit) {
-    throw new GateRefusal(
-      `Refused: target looks like a DRM/circumvention tool (${hit}). ` +
-        'Unvibe only rebuilds apps you own — it is not a circumvention tool.',
-    );
-  }
-}
-
-/** v1 scope: Lovable only. Localhost allowed only via explicit dev opt-in. */
-export function checkTargetScope(url: string): void {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    throw new GateRefusal(`Refused: "${url}" is not a valid URL.`);
-  }
-  const allowLocal = process.env.UNVIBE_ALLOW_LOCALHOST === '1';
-  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  if (isLocal && allowLocal) return;
-  if (isLocal) {
-    throw new GateRefusal(
-      'Refused: v1 targets must be *.lovable.app. ' +
-        'Localhost is only allowed with UNVIBE_ALLOW_LOCALHOST=1 (development/tests).',
-    );
-  }
-  if (!host.endsWith('.lovable.app')) {
-    throw new GateRefusal(
-      `Refused: "${host}" is not a Lovable app. v1 supports *.lovable.app targets only.`,
-    );
-  }
-}
+export {
+  checkCircumventionTarget,
+  checkTargetScope,
+  normalizeForDenylist,
+  stripUrlCredentials,
+  normalizeUrlForCompare,
+  checkUrlMatchesSpec,
+  assertValidAttestation,
+  GateRefusal,
+} from '@tamtunnel/unvibe-core';
+export type { OwnershipAttestation } from '@tamtunnel/unvibe-core';
 
 export interface GateOptions {
   /** --i-own-this was passed */
@@ -94,10 +51,13 @@ function defaultPrompt(): Promise<string> {
 }
 
 /**
- * Enforce the ownership gate. Returns the attestation record for the spec,
- * or throws GateRefusal.
+ * Obtain the ownership attestation: --i-own-this, or the interactive YES
+ * prompt on a TTY. Scope + circumvention checks run first so obviously
+ * out-of-scope targets are refused before any attestation is requested.
  */
-export async function enforceOwnershipGate(opts: GateOptions): Promise<OwnershipAttestation> {
+export async function enforceOwnershipGate(
+  opts: GateOptions,
+): Promise<import('@tamtunnel/unvibe-core').OwnershipAttestation> {
   checkCircumventionTarget(opts.url);
   checkTargetScope(opts.url);
 

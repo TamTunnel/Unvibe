@@ -36,6 +36,11 @@ export interface AnalyzeOptions {
   onProgress?: (msg: string) => void;
 }
 
+/** Convert a snake_case table name to a PascalCase entity name. M2: the old regex uppercased the separator. */
+export function tableToEntityName(table: string): string {
+  const base = table.replace(/(^|_)([a-z])/g, (_m: string, _g1: string, g2: string) => g2.toUpperCase()).replace(/_/g, '');
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
 /** Normalize a URL into a pattern: numeric/uuid path segments → :param. */
 export function normalizeUrlPattern(url: string): string {
   let path: string;
@@ -54,13 +59,74 @@ export function normalizeUrlPattern(url: string): string {
     .join('/');
 }
 
-/** Infer a JSON shape from a runtime value. Examples are truncated. */
-export function inferShape(value: unknown, depth = 0): JsonShape {
+/** Keys whose values must never reach the spec, prompts, or output repo. */
+export const SECRET_KEY_RE = /key|token|secret|passwd|password|auth|credential/i;
+
+/** Values shaped like well-known credential formats (Stripe, GitHub, AWS, JWT, PEM…). */
+const KNOWN_SECRET_VALUE_RE =
+  /^(sk_(live|test)_|pk_(live|test)_|ghp_|gho_|github_pat_|xox[bap]-|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/;
+
+/** Shannon entropy per character — random tokens score ~5–6 bits, prose ~4. */
+function shannonEntropy(s: string): number {
+  const freq = new Map<string, number>();
+  for (const ch of s) freq.set(ch, (freq.get(ch) ?? 0) + 1);
+  let h = 0;
+  for (const n of freq.values()) {
+    const p = n / s.length;
+    h -= p * Math.log2(p);
+  }
+  return h;
+}
+
+/**
+ * Decide whether a string example is secret-shaped. Structural values
+ * (URLs, emails, UUIDs, dates) are never treated as secrets even when long.
+ */
+export function isSecretShaped(value: string, keyName?: string): boolean {
+  if (keyName && SECRET_KEY_RE.test(keyName)) return true;
+  if (KNOWN_SECRET_VALUE_RE.test(value)) return true;
+  if (value.length >= 24 && shannonEntropy(value) >= 4.5) {
+    const structural =
+      /^https?:\/\//.test(value) ||
+      /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ||
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value);
+    if (!structural) return true;
+  }
+  return false;
+}
+
+/** Mask a secret-shaped example: record {redacted: true}, never the value. */
+function maskExample(value: unknown, keyName?: string): unknown {
+  if (typeof value === 'string' && isSecretShaped(value, keyName)) return { redacted: true };
+  return value;
+}
+
+/**
+ * Deep-scrub a raw example value (used for array examples, which are raw
+ * elements, not shapes): any secret-shaped string anywhere in the subtree
+ * becomes {redacted: true}.
+ */
+function scrubRaw(value: unknown, keyName?: string): unknown {
+  if (Array.isArray(value)) return value.slice(0, 1).map((v) => scrubRaw(v, keyName));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = typeof v === 'string' && isSecretShaped(v, k) ? { redacted: true } : scrubRaw(v, k);
+    }
+    return out;
+  }
+  return maskExample(value, keyName);
+}
+
+/** Infer a JSON shape from a runtime value. Secret-shaped examples are masked. */
+export function inferShape(value: unknown, depth = 0, keyName?: string, inSecretSubtree = false): JsonShape {
+  const secretCtx = inSecretSubtree || (keyName !== undefined && SECRET_KEY_RE.test(keyName));
   if (value === null) return { type: 'null' };
   if (Array.isArray(value)) {
-    const itemShapes = value.slice(0, 5).map((v) => inferShape(v, depth + 1));
+    const itemShapes = value.slice(0, 5).map((v) => inferShape(v, depth + 1, keyName, secretCtx));
     const merged = mergeShapes(itemShapes);
-    return { type: 'array', items: merged, examples: value.slice(0, 1) };
+    return { type: 'array', items: merged, examples: value.length > 0 ? [scrubRaw(value[0], keyName)] : [] };
   }
   switch (typeof value) {
     case 'string': {
@@ -71,7 +137,8 @@ export function inferShape(value: unknown, depth = 0): JsonShape {
         : /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) ? 'email'
         : /^https?:\/\//.test(v) ? 'url'
         : undefined;
-      return { type: 'string', ...(format ? { format } : {}), examples: [v.slice(0, 80)] };
+      const example = secretCtx || isSecretShaped(v, keyName) ? { redacted: true } : v.slice(0, 80);
+      return { type: 'string', ...(format ? { format } : {}), examples: [example] };
     }
     case 'number': return { type: 'number', examples: [value] };
     case 'boolean': return { type: 'boolean', examples: [value] };
@@ -80,7 +147,7 @@ export function inferShape(value: unknown, depth = 0): JsonShape {
       const props: Record<string, JsonShape> = {};
       const required: string[] = [];
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        props[k] = inferShape(v, depth + 1);
+        props[k] = inferShape(v, depth + 1, k, secretCtx);
         if (v !== null && v !== undefined) required.push(k);
       }
       return { type: 'object', properties: props, required };
@@ -146,6 +213,18 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
   // 3. Merge HAR endpoints + bundle-referenced endpoints.
   const endpoints: SpecEndpoint[] = [];
   const seenPatterns = new Map<string, SpecEndpoint>();
+  // M3: attribute endpoints to routes from capture's per-route request log.
+  // (Previously addEndpoint was called without routePath, so SpecRoute.apiCalls
+  // was always empty — a hollow field.)
+  const routesByUrlPattern = new Map<string, string[]>();
+  for (const [routePath, urls] of Object.entries(capture.routeRequests ?? {})) {
+    for (const u of urls) {
+      const p = normalizeUrlPattern(u);
+      const arr = routesByUrlPattern.get(p) ?? [];
+      if (!arr.includes(routePath)) arr.push(routePath);
+      routesByUrlPattern.set(p, arr);
+    }
+  }
   const addEndpoint = (c: HarEndpointCandidate, origin: 'har' | 'bundle', routePath?: string) => {
     if (!looksLikeApi(c.url, c.contentType) && origin === 'har') return;
     const pattern = normalizeUrlPattern(c.url);
@@ -165,13 +244,15 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
       endpoints.push(ep);
     }
     ep.sampleCount++;
+    for (const rp of [...(routePath ? [routePath] : []), ...(routesByUrlPattern.get(pattern) ?? [])]) {
+      if (!ep.routes.includes(rp)) ep.routes.push(rp);
+    }
     if (c.requestBody !== undefined && !ep.requestShape) {
       try { ep.requestShape = inferShape(c.requestBody); } catch { /* ignore */ }
     }
     if (c.responseBody !== undefined && !ep.responseShape) {
       try { ep.responseShape = inferShape(c.responseBody); } catch { /* ignore */ }
     }
-    if (routePath && !ep.routes.includes(routePath)) ep.routes.push(routePath);
   };
 
   for (const c of harCandidates) {
@@ -209,13 +290,11 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
       let entity = entityByName.get(key);
       if (!entity) {
         const fieldNames = Object.keys(shape.properties ?? {}).slice(0, 6).join(', ');
-        const base = table.replace(/(^|_)([a-z])/g, (_p1: string, p2: string) => p2.toUpperCase()).replace(/_/g, '');
-        const pascalBase = base.charAt(0).toUpperCase() + base.slice(1);
         // Deterministic by default; a custom namer (e.g. LLM) may polish the name.
-        let name = pascalBase;
+        let name = tableToEntityName(table);
         if (opts.namer) {
           try {
-            name = await opts.namer('entity', `${pascalBase} (observed fields: ${fieldNames})`);
+            name = await opts.namer('entity', `${name} (observed fields: ${fieldNames})`);
           } catch { /* deterministic fallback */ }
         }
         entity = {
@@ -232,6 +311,7 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
             nullable: !(shape.required ?? []).includes(fname),
           })),
           source: 'har-payload',
+          sourceEndpointId: ep.id,
           evidence: [],
         };
         entityByName.set(key, entity);
@@ -294,7 +374,7 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
   return spec;
 }
 
-function detectAuth(providerHints: string[], urls: string[]): SpecAuth {
+export function detectAuth(providerHints: string[], urls: string[]): SpecAuth {
   const evidence: string[] = [];
   const hostHit = (re: RegExp, label: string) => {
     if (urls.some((u) => re.test(u))) evidence.push(label);
@@ -312,7 +392,10 @@ function detectAuth(providerHints: string[], urls: string[]): SpecAuth {
   else if (evidence.some((e) => e.includes('clerk'))) provider = 'clerk';
   else if (evidence.some((e) => e.includes('firebase'))) provider = 'firebase';
   else if (evidence.some((e) => e.includes('auth0'))) provider = 'auth0';
-  else if (providerHints.length > 0 || urls.length > 0) provider = 'unknown';
+  // M1: no evidence → 'none', not 'unknown'. The old `|| urls.length > 0`
+  // fallback made EVERY capture report 'unknown' (every HAR has URLs) and
+  // emitted a spurious auth-config BACKEND-GAP.
+  else if (providerHints.length > 0) provider = 'unknown';
   return { provider, evidence };
 }
 

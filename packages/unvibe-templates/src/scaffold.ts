@@ -7,6 +7,7 @@
  * the API client, and entity types from behavioral spec data.
  */
 import type { UnvibeSpec, SpecEntity } from '@tamtunnel/unvibe-core';
+import { routeToComponentName as canonicalComponentName, routeToImportSpecifier as canonicalImportSpecifier } from '@tamtunnel/unvibe-core';
 
 const SQL_TYPES: Record<string, string> = {
   string: 'text',
@@ -26,16 +27,11 @@ const DRIZZLE_TYPES: Record<string, string> = {
   uuid: 'uuid',
 };
 
-function routeComponentName(path: string): string {
-  const slug = path.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'home';
-  const pascal = slug.split('-').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
-  return `${pascal}Page`;
-}
-
-function routeFile(path: string): string {
-  const slug = path.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'home';
-  return `./pages/${slug}.tsx`;
-}
+// Route naming is canonical in @tamtunnel/unvibe-core (route-naming.ts) so the
+// scaffold, the regenerate prompt, and the verify gate all agree.
+const routeComponentName = canonicalComponentName;
+// routeFile is relative to src/ (App.tsx lives at src/App.tsx), extensionless.
+const routeFile = (path: string): string => canonicalImportSpecifier(path);
 
 export function renderDrizzleSchema(entities: SpecEntity[]): string {
   const imports = new Set<string>(['pgTable']);
@@ -180,16 +176,10 @@ from. Everything the rebuild "knew" is in that file — audit it.
 }
 
 function renderAuthRunbook(spec: UnvibeSpec): string {
-  return `# Auth migration runbook
-
-Detected provider in the original app: **${spec.auth.provider}**
-
-Evidence:
-${spec.auth.evidence.map((e) => `- ${e}`).join('\n') || '- (none — no auth markers observed)'}
-
-Unvibe does NOT export user tables or credentials. Migrate auth yourself:
-
-## Supabase (detected)
+  // m4: the provider-specific section is conditional — the old template
+  // rendered "## Supabase (detected)" even for clerk/none/unknown.
+  const providerSection = spec.auth.provider === 'supabase'
+    ? `## Supabase (detected)
 
 1. Create a new project — self-hosted (\`docker compose up -d\` in this repo)
    or Supabase Cloud — this is YOUR instance now.
@@ -200,7 +190,29 @@ Unvibe does NOT export user tables or credentials. Migrate auth yourself:
    (\`auth.admin.createUser\` / \`listUsers\`); there is no automated
    user-table export — that is deliberate.
 5. Recreate RLS policies (see BACKEND-GAPS.md) and test with real roles.
+`
+    : spec.auth.provider === 'none'
+      ? `## No auth provider detected
 
+No auth markers were observed during capture. If the original app does have
+login, it was not exercised while crawling — wire up \`src/lib/auth.ts\`
+to your own auth instance before shipping.
+`
+      : `## ${spec.auth.provider} (detected)
+
+Point \`src/lib/auth.ts\` at your own tenant, re-register OAuth apps, and
+migrate users via the provider's official export/import tooling.
+`;
+  return `# Auth migration runbook
+
+Detected provider in the original app: **${spec.auth.provider}**
+
+Evidence:
+${spec.auth.evidence.map((e) => `- ${e}`).join('\n') || '- (none — no auth markers observed)'}
+
+Unvibe does NOT export user tables or credentials. Migrate auth yourself:
+
+${providerSection}
 ## Other providers
 
 Point \`src/lib/auth.ts\` at your own tenant, re-register OAuth apps, and
