@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.unvibe/
+coverage/
+*.log
+.DS_Store
+demo-site/unvibe-demo.mp4

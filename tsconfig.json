@@ -1,0 +1,9 @@
+{
+  "references": [
+    { "path": "packages/unvibe-core" },
+    { "path": "packages/unvibe-templates" },
+    { "path": "packages/unvibe-verify" },
+    { "path": "packages/unvibe-cli" }
+  ],
+  "files": []
+}

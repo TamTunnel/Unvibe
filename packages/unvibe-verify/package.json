@@ -1,0 +1,30 @@
+{
+  "name": "@tamtunnel/unvibe-verify",
+  "version": "0.1.0",
+  "description": "Unvibe verify stage: screenshot-diff fidelity gate + contract tests against inferred API shapes.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pixelmatch": "^5.3.0",
+    "playwright": "^1.49.1",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

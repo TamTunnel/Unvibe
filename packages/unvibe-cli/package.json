@@ -1,0 +1,26 @@
+{
+  "name": "@tamtunnel/unvibe-cli",
+  "version": "0.1.0",
+  "description": "Unvibe CLI — capture, analyze, regenerate, verify. Only processes apps you own.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": { "unvibe": "dist/cli.js" },
+  "exports": { ".": "./dist/index.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tamtunnel/unvibe-core": "0.1.0",
+    "@tamtunnel/unvibe-templates": "0.1.0",
+    "@tamtunnel/unvibe-verify": "0.1.0",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

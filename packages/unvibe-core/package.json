@@ -1,0 +1,24 @@
+{
+  "name": "@tamtunnel/unvibe-core",
+  "version": "0.1.0",
+  "description": "Unvibe core pipeline: capture → analyze → spec → regenerate. Deterministic spec, LLM rebuild, clean-room boundary.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": "./dist/index.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc -b --dry 2>/dev/null; tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "playwright": "^1.49.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
