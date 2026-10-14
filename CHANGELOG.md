@@ -2,9 +2,10 @@
 
 All notable changes to this project are documented here. Follows semver.
 The spec schema version (`specVersion`, currently `1.0.0`) is versioned
-independently of the npm packages.
+independently of the npm packages. Everything below is live on `main`;
+npm publication of the packages is pending.
 
-## [Unreleased]
+## [0.1.0] — 2026-10-13
 
 Security hardening (adversarial judge + review gate findings, all fixed
 with regression tests):
@@ -64,10 +65,15 @@ with regression tests):
 - Docs: README no longer claims bundle-export ingestion or full Supabase
   compose; circumvention-gate limits stated; `UNVIBE_COOKIE` env var
   documented in SECURITY.md.
-
-## [0.1.0] — 2026-10-13
-
-Initial MVP.
+- **WebSocket SSRF**: the CDP Fetch domain does not intercept WebSocket
+  handshakes, so page JS could open `ws://` to internal addresses unseen.
+  Two-layer guard: an init-script `WebSocket` wrapper synchronously refuses
+  private/metadata IP literals, and Node-side validation (with DNS)
+  closes violating sockets from inside the page. Same-host and public
+  cross-origin sockets (e.g. Supabase realtime) keep working.
+- **Path-segment secrets**: high-entropy URL path segments (password-reset
+  tokens, invite codes) are now normalized to `:param` instead of entering
+  the spec verbatim.
 
 ### Added
 

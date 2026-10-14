@@ -13,6 +13,12 @@ describe('normalizeUrlPattern', () => {
   it('leaves static segments alone', () => {
     expect(normalizeUrlPattern('https://x.lovable.app/api/projects')).toBe('/api/projects');
   });
+  it('replaces high-entropy token-like path segments with :param (secret hygiene)', () => {
+    // Password-reset / invite tokens must never enter the spec verbatim.
+    expect(normalizeUrlPattern('https://x.lovable.app/api/reset/aB3dE5fG7hJ9kL2mN4pQ6rS8tU0'))
+      .toBe('/api/reset/:param');
+    expect(normalizeUrlPattern('https://x.lovable.app/about-us')).toBe('/about-us');
+  });
 });
 
 describe('inferShape', () => {

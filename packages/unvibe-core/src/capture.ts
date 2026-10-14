@@ -118,6 +118,51 @@ export async function assertEgressAllowed(
   }
 }
 
+/**
+ * Validate a WebSocket handshake URL. Narrower than assertEgressAllowed:
+ * cross-origin PUBLIC websockets are legitimate app behavior (Supabase
+ * realtime, etc.) and must keep working — the SSRF danger is specifically
+ * private/metadata IPs. Throws EgressBlockedError for ws(s) URLs that
+ * resolve to a blocked IP. Non-ws(s) schemes are refused outright.
+ */
+export async function assertWebsocketAllowed(
+  requestUrl: string,
+  initialHost: string,
+): Promise<void> {
+  let u: URL;
+  try {
+    u = new URL(requestUrl);
+  } catch {
+    throw new EgressBlockedError(`blocked: not a valid websocket URL: ${requestUrl}`);
+  }
+  if (u.protocol !== 'ws:' && u.protocol !== 'wss:') {
+    throw new EgressBlockedError(`blocked: non-websocket scheme ${u.protocol} in websocket handler`);
+  }
+  const host = u.hostname.toLowerCase();
+  if (host === initialHost.toLowerCase()) return; // same host as the target
+  if (isIP(host) !== 0) {
+    if (isBlockedIp(host)) {
+      throw new EgressBlockedError(`blocked: websocket to private/metadata IP ${host}`);
+    }
+    return;
+  }
+  let addrs = dnsCache.get(host);
+  if (!addrs) {
+    try {
+      addrs = (await dnsLookup(host, { all: true })).map((a) => a.address);
+    } catch {
+      addrs = [];
+    }
+    dnsCache.set(host, addrs);
+  }
+  const bad = addrs.filter(isBlockedIp);
+  if (bad.length > 0) {
+    throw new EgressBlockedError(
+      `blocked: websocket host ${host} resolves to private/metadata IP(s): ${bad.join(', ')}`,
+    );
+  }
+}
+
 export interface CaptureOptions {
   url: string;
   outDir: string;
@@ -305,6 +350,89 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
       const getBlockedNavigationUrl = await installEgressGuard(page).catch((e) => {
         log(`capture: WARN could not install egress guard: ${(e as Error).message.split('\n')[0]}`);
         return () => null as string | null;
+      });
+      // WebSocket SSRF guard (two layers — the CDP Fetch domain does not
+      // intercept WebSocket handshakes, verified empirically):
+      //
+      // Layer 1 (init script): wrap window.WebSocket to synchronously refuse
+      // handshakes to private/metadata IP literals (127/10/172.16/192.168/
+      // 169.254/100.64/0.0.0.0, ::1/fe80/fc00::/7). No race — the handshake
+      // never starts. All created sockets are registered for layer 2.
+      //
+      // Layer 2 (Node): page.on('websocket') runs assertWebsocketAllowed
+      // (adds DNS resolution for hostnames); violations are closed from
+      // inside the page via the registry (Playwright's API has no close()).
+      // Same-host and public cross-origin sockets (Supabase realtime, etc.)
+      // are unaffected by both layers.
+      await page.addInitScript(() => {
+        const OrigWebSocket = window.WebSocket;
+        const registry: { ws: WebSocket; url: string }[] = [];
+        const w = window as unknown as {
+          __unvibeWsRegistry?: { ws: WebSocket; url: string }[];
+          WebSocket: typeof WebSocket;
+        };
+        w.__unvibeWsRegistry = registry;
+        function isBlockedIpLiteral(host: string): boolean {
+          const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+          if (v4) {
+            const a = Number(v4[1]);
+            const b = Number(v4[2]);
+            return (
+              a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) ||
+              (a === 192 && b === 168) || (a === 169 && b === 254) ||
+              (a === 100 && b >= 64 && b <= 127) || a === 0
+            );
+          }
+          const n = host.toLowerCase();
+          return n === '::1' || n.startsWith('fe80:') || n.startsWith('fc') || n.startsWith('fd');
+        }
+        function PatchedWebSocket(this: unknown, url: string | URL, protocols?: string | string[]) {
+          let host = '';
+          try {
+            host = new URL(String(url), window.location.href).hostname.toLowerCase();
+          } catch {
+            /* let the original constructor throw */
+          }
+          // Same host as the page itself is always allowed (covers the
+          // UNVIBE_ALLOW_LOCALHOST dev case where the target is 127.0.0.1).
+          const pageHost = window.location.hostname.toLowerCase();
+          if (host && host !== pageHost && isBlockedIpLiteral(host)) {
+            throw new DOMException(
+              `Unvibe egress guard: websocket to private/metadata IP ${host} blocked`,
+              'SecurityError',
+            );
+          }
+          const ws =
+            protocols === undefined ? new OrigWebSocket(url) : new OrigWebSocket(url, protocols);
+          registry.push({ ws, url: String(url) });
+          ws.addEventListener('close', () => {
+            const i = registry.findIndex((e) => e.ws === ws);
+            if (i >= 0) registry.splice(i, 1);
+          });
+          return ws;
+        }
+        PatchedWebSocket.prototype = OrigWebSocket.prototype;
+        w.WebSocket = PatchedWebSocket as unknown as typeof WebSocket;
+      }).catch((e) => {
+        log(`capture: WARN could not install websocket guard: ${(e as Error).message.split('\n')[0]}`);
+      });
+      page.on('websocket', (ws) => {
+        const wsUrl = ws.url();
+        void (async () => {
+          try {
+            await assertWebsocketAllowed(wsUrl, target.hostname);
+          } catch (e) {
+            log(`capture: BLOCKED websocket to ${wsUrl} (${(e as Error).message})`);
+            await page
+              .evaluate((url: string) => {
+                const w = window as unknown as {
+                  __unvibeWsRegistry?: { ws: { close(): void }; url: string }[];
+                };
+                w.__unvibeWsRegistry?.find((r) => r.url === url)?.ws.close();
+              }, wsUrl)
+              .catch(() => {});
+          }
+        })();
       });
       // M3: attribute requests to the route being visited (endpoint→route).
       const pageRequests: string[] = [];

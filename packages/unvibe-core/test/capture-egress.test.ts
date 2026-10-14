@@ -168,3 +168,84 @@ describe('capture resilience (M7 / m10)', () => {
     }
   }, 30000);
 });
+
+describe('websocket SSRF guard', () => {
+  // The CDP Fetch domain does not intercept WebSocket handshakes, so the
+  // capture installs a two-layer guard: an init-script WebSocket wrapper
+  // (synchronous IP-literal block) + Node-side validation with in-page
+  // close for DNS-resolved hostnames.
+  it('blocks ws:// to a private/metadata IP and never reaches the internal server', async () => {
+    let upgradeSeen = false;
+    const victim = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('x');
+    });
+    victim.on('upgrade', (_req, socket) => {
+      upgradeSeen = true;
+      socket.destroy();
+    });
+    await new Promise<void>((r) => victim.listen(0, '127.0.0.2', r));
+    const victimPort = (victim.address() as { port: number }).port;
+
+    const target = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(
+        `<html><head><title>w</title></head><body><script>` +
+          `try { const ws = new WebSocket('ws://127.0.0.2:${victimPort}/evil'); ws.onerror=()=>{}; } catch (e) {}` +
+          `</script></body></html>`,
+      );
+    });
+    await new Promise<void>((r) => target.listen(0, '127.0.0.1', r));
+    const targetPort = (target.address() as { port: number }).port;
+    try {
+      const outDir = await mkdtemp(join(tmpdir(), 'unvibe-ws-'));
+      await captureSite({
+        url: `http://127.0.0.1:${targetPort}/`, outDir, maxPages: 1, timeoutMs: 8000, onProgress: () => {},
+      });
+      expect(upgradeSeen).toBe(false);
+    } finally {
+      victim.close();
+      target.close();
+    }
+  }, 30000);
+
+  it('still allows legitimate same-origin websockets', async () => {
+    const { createHash } = await import('node:crypto');
+    let dataSeen = false;
+    const target = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(
+        `<html><head><title>w</title></head><body><script>` +
+          `const ws = new WebSocket('ws://' + location.host + '/rt');` +
+          `ws.onopen = () => ws.send('legit');` +
+          `</script></body></html>`,
+      );
+    });
+    target.on('upgrade', (req, socket) => {
+      const key = req.headers['sec-websocket-key'] as string;
+      const accept = createHash('sha1')
+        .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+        .digest('base64');
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+          `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      );
+      socket.on('data', () => {
+        dataSeen = true;
+      });
+      setTimeout(() => socket.destroy(), 4000);
+    });
+    await new Promise<void>((r) => target.listen(0, '127.0.0.1', r));
+    const targetPort = (target.address() as { port: number }).port;
+    try {
+      const outDir = await mkdtemp(join(tmpdir(), 'unvibe-ws-legit-'));
+      await captureSite({
+        url: `http://127.0.0.1:${targetPort}/`, outDir, maxPages: 1, timeoutMs: 8000, onProgress: () => {},
+      });
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(dataSeen).toBe(true);
+    } finally {
+      target.close();
+    }
+  }, 30000);
+});

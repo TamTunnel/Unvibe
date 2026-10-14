@@ -41,7 +41,7 @@ export function tableToEntityName(table: string): string {
   const base = table.replace(/(^|_)([a-z])/g, (_m: string, _g1: string, g2: string) => g2.toUpperCase()).replace(/_/g, '');
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
-/** Normalize a URL into a pattern: numeric/uuid path segments → :param. */
+/** Normalize a URL into a pattern: numeric/uuid/secret-shaped path segments → :param. */
 export function normalizeUrlPattern(url: string): string {
   let path: string;
   try {
@@ -54,7 +54,9 @@ export function normalizeUrlPattern(url: string): string {
     .map((seg) =>
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) || /^\d+$/.test(seg)
         ? ':param'
-        : seg,
+        : // High-entropy path segments are usually tokens (password-reset links,
+          // invite codes) — never let them enter the spec verbatim.
+          (seg.length >= 16 && isSecretShaped(seg) ? ':param' : seg),
     )
     .join('/');
 }
