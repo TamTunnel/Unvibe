@@ -123,10 +123,9 @@ export async function stageRegenerate(opts: RunOptions, paths: StagePaths, spec:
     );
   }
   await mkdir(paths.repoDir, { recursive: true });
+  const { dirname } = await import('node:path');
   for (const [rel, content] of Object.entries(result.files)) {
     const abs = join(paths.repoDir, rel);
-    await mkdir(join(abs, '..'), { recursive: true }).catch(() => {});
-    const { dirname } = await import('node:path');
     await mkdir(dirname(abs), { recursive: true });
     await writeFile(abs, content);
   }

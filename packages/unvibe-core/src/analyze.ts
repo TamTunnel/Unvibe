@@ -191,16 +191,6 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
   log('analyze: inferring data model from observed payloads');
   const entities: SpecEntity[] = [];
   const entityByName = new Map<string, SpecEntity>();
-  const namer = opts.namer ?? (async (_k, hint) => hint);
-  const toEntityName = async (table: string, hint: string): Promise<string> => {
-    const base = table.replace(/(^|_)([a-z])/g, (_, p1: string, p2: string) => p1 + p2.toUpperCase()).replace(/_/g, '');
-    const pascal = base.charAt(0).toUpperCase() + base.slice(1);
-    try {
-      return await namer('entity', `${pascal} (observed fields: ${hint})`);
-    } catch {
-      return pascal;
-    }
-  };
   for (const ep of endpoints) {
     const shapes: { shape: JsonShape; evidence: string }[] = [];
     if (ep.responseShape?.type === 'array' && ep.responseShape.items?.type === 'object') {
@@ -219,7 +209,15 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
       let entity = entityByName.get(key);
       if (!entity) {
         const fieldNames = Object.keys(shape.properties ?? {}).slice(0, 6).join(', ');
-        const name = await toEntityName(table, fieldNames);
+        const base = table.replace(/(^|_)([a-z])/g, (_p1: string, p2: string) => p2.toUpperCase()).replace(/_/g, '');
+        const pascalBase = base.charAt(0).toUpperCase() + base.slice(1);
+        // Deterministic by default; a custom namer (e.g. LLM) may polish the name.
+        let name = pascalBase;
+        if (opts.namer) {
+          try {
+            name = await opts.namer('entity', `${pascalBase} (observed fields: ${fieldNames})`);
+          } catch { /* deterministic fallback */ }
+        }
         entity = {
           name,
           tableName: table.toLowerCase(),
@@ -262,7 +260,7 @@ export async function analyzeCapture(opts: AnalyzeOptions): Promise<UnvibeSpec> 
       title: r.title,
       screenshot: r.screenshot,
       outgoingLinks: r.outgoingLinks,
-      components: await extractComponents(capDir, r, namer),
+      components: await extractComponents(capDir, r, opts.namer),
       apiCalls: endpoints.filter((e) => e.routes.includes(r.path)).map((e) => e.id),
     });
   }
@@ -371,7 +369,7 @@ async function inventoryAssets(capDir: string, capture: CaptureResult): Promise<
 async function extractComponents(
   capDir: string,
   route: CapturedRoute,
-  namer: (kind: 'entity' | 'component', hint: string) => Promise<string>,
+  namer?: (kind: 'entity' | 'component', hint: string) => Promise<string>,
 ): Promise<SpecComponent[]> {
   // The capture stage stores routes.json; HTML text was measured but the DOM
   // inventory below works from a lightweight re-parse of saved page structure.
@@ -404,9 +402,11 @@ async function extractComponents(
   };
   for (const el of dom) {
     let name = `${kindOf(el.tag)}-${el.tag}`;
-    try {
-      name = await namer('component', `${el.tag}: ${(el.text ?? '').slice(0, 60)}`);
-    } catch { /* deterministic fallback */ }
+    if (namer) {
+      try {
+        name = await namer('component', `${el.tag}: ${(el.text ?? '').slice(0, 60)}`);
+      } catch { /* deterministic fallback */ }
+    }
     comps.push({ name, kind: kindOf(el.tag), text: (el.text ?? '').slice(0, 500), count: el.count });
   }
   return comps;
