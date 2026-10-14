@@ -45,6 +45,6 @@ jobs:
 
       - name: Publish packages in dependency order
         run: |
-          for p in core templates verify cli; do
+          for p in unvibe-core unvibe-templates unvibe-verify unvibe-cli; do
             npm publish --workspace "packages/$p" --provenance --access public
           done
