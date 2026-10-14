@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unvibe — an escape hatch for vibe-locked apps</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#131926; --line:#232c40; --txt:#e6ebf4; --dim:#9aa7bd; --acc:#7cc4ff; --grn:#6fdc8c; --amb:#ffcf6e; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; line-height:1.6; }
+  header.hero { padding:72px 24px 48px; text-align:center; max-width:880px; margin:0 auto; }
+  header.hero h1 { font-size:clamp(2rem,5vw,3.2rem); margin:0 0 12px; letter-spacing:-0.02em; }
+  header.hero h1 .vibe { color:var(--amb); text-decoration:line-through; }
+  header.hero p { color:var(--dim); font-size:1.1rem; max-width:640px; margin:0 auto 24px; }
+  .cta { display:inline-block; background:var(--acc); color:#06121f; font-weight:700; padding:12px 28px; border-radius:10px; text-decoration:none; margin:4px 8px; }
+  .cta.ghost { background:transparent; color:var(--acc); border:1px solid var(--acc); }
+  section { max-width:1020px; margin:0 auto; padding:40px 24px; }
+  h2 { font-size:1.6rem; margin:0 0 8px; letter-spacing:-0.01em; }
+  .sub { color:var(--dim); margin:0 0 28px; max-width:720px; }
+  .pipe { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .stage { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  .stage .n { font-size:.75rem; color:var(--acc); font-weight:700; letter-spacing:.08em; }
+  .stage h3 { margin:6px 0 8px; font-size:1.05rem; }
+  .stage p { margin:0; color:var(--dim); font-size:.9rem; }
+  .stage .tag { display:inline-block; margin-top:10px; font-size:.72rem; padding:2px 8px; border-radius:20px; background:#1d2740; color:var(--acc); }
+  .shots { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .shot { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .shot img { width:100%; display:block; aspect-ratio:16/10; object-fit:cover; object-position:top; background:#fff; }
+  .shot .lbl { padding:10px 14px; font-size:.85rem; color:var(--dim); border-top:1px solid var(--line); }
+  .shot .lbl b { color:var(--txt); }
+  pre.code { background:#0d1220; border:1px solid var(--line); border-radius:12px; padding:20px; overflow:auto; font-size:.82rem; line-height:1.55; color:#c9d6ea; max-height:520px; }
+  .gaps { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:8px 24px; }
+  .gaps h4 { color:var(--amb); margin:18px 0 6px; }
+  .gaps p, .gaps li { color:var(--dim); font-size:.92rem; }
+  .honest { border-left:3px solid var(--amb); background:#171307; padding:14px 18px; border-radius:0 10px 10px 0; color:var(--dim); font-size:.92rem; margin:24px 0; }
+  .honest b { color:var(--amb); }
+  table.rep { width:100%; border-collapse:collapse; font-size:.9rem; }
+  table.rep td, table.rep th { border-bottom:1px solid var(--line); padding:8px 10px; text-align:left; }
+  table.rep td:last-child { color:var(--grn); font-weight:700; }
+  video.demo { width:100%; border-radius:12px; border:1px solid var(--line); background:#000; }
+  footer { text-align:center; color:var(--dim); padding:40px 24px 64px; font-size:.9rem; }
+  footer a { color:var(--acc); }
+  @media (max-width:760px){ .pipe{grid-template-columns:1fr 1fr;} .shots{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1><span class="vibe">Vibe</span>-locked? Take your app with you.</h1>
+  <p><b>Unvibe</b> points at a vibe-coded app you own, records what it <i>does</i>,
+  and rebuilds it as a real, self-hostable repo — same routes, same data, same flows.
+  No platform lock-in. No copied code.</p>
+  <a class="cta" href="#video">▶ Watch the demo</a>
+  <a class="cta ghost" href="https://github.com/TamTunnel/unvibe">GitHub</a>
+</header>
+
+<section>
+  <h2>How it works</h2>
+  <p class="sub">Four stages. The spec in the middle is the product's contract: versioned,
+  human-readable, and checked into every output repo.</p>
+  <div class="pipe">
+    <div class="stage"><div class="n">01 · CAPTURE</div><h3>Record behavior</h3>
+      <p>Headless browser crawls routes, records HAR traffic, downloads assets, screenshots every page.</p>
+      <span class="tag">deterministic · Playwright</span></div>
+    <div class="stage"><div class="n">02 · ANALYZE</div><h3>Spec, not source</h3>
+      <p>Route map, API inventory, data-model inference, auth detection → versioned <code>unvibe-spec.json</code>.</p>
+      <span class="tag">deterministic · REA eyes</span></div>
+    <div class="stage"><div class="n">03 · REGENERATE</div><h3>Rebuild clean-room</h3>
+      <p>Your LLM writes fresh React+TS <b>from the spec only</b> — it never sees platform bundle text.</p>
+      <span class="tag">BYOK · template-bounded</span></div>
+    <div class="stage"><div class="n">04 · VERIFY</div><h3>Prove it</h3>
+      <p>Screenshot-diff per route plus contract tests against the inferred API shapes.</p>
+      <span class="tag">pixelmatch · contracts</span></div>
+  </div>
+</section>
+
+<section id="video">
+  <h2>Demo video</h2>
+  <p class="sub">The full pipeline running against a synthetic fixture app — capture →
+  analyze → regenerate → verify, all passing. Rebuilt with the deterministic mock
+  provider (offline demo mode); a real LLM produces idiomatic components from the same spec.</p>
+  <video class="demo" controls preload="metadata" poster="assets/after-home.png">
+    <source src="unvibe-demo.mp4" type="video/mp4">
+    Your browser can't play this video. <a href="unvibe-demo.mp4">Download it instead</a>.
+  </video>
+</section>
+
+<section>
+  <h2>Before → after</h2>
+  <p class="sub">Real output from the fixture run: the original app (captured) next to the
+  rebuilt app (regenerated, built with Vite, served). Same routes, same content —
+  verify diffs: 0.6% / 0.4% / 0.9%.</p>
+  <div class="shots">
+    <div class="shot"><img src="assets/before-home.png" alt="Original fixture app, home route"><div class="lbl"><b>Before</b> — captured from the live fixture app</div></div>
+    <div class="shot"><img src="assets/after-home.png" alt="Rebuilt app, home route"><div class="lbl"><b>After</b> — regenerated repo, <code>vite build</code> + served</div></div>
+    <div class="shot"><img src="assets/before-dashboard.png" alt="Original fixture app, dashboard route"><div class="lbl"><b>Before</b> — dashboard route, captured</div></div>
+    <div class="shot"><img src="assets/after-dashboard.png" alt="Rebuilt app, dashboard route"><div class="lbl"><b>After</b> — dashboard route, rebuilt</div></div>
+  </div>
+  <div class="honest"><b>Honest scope:</b> Unvibe promises route-level and contract-level
+  fidelity — the same routes exist, the same API endpoints are called with the same shapes.
+  Pixel-perfect UI is explicitly out of scope.</div>
+</section>
+
+<section>
+  <h2>The spec is the contract</h2>
+  <p class="sub">Everything the rebuild "knew" is in <code>unvibe-spec.json</code> — behavior,
+  never platform source. Excerpt from the fixture run:</p>
+  <pre class="code" id="specPre">loading…</pre>
+</section>
+
+<section>
+  <h2>Honest about what can't be recovered</h2>
+  <p class="sub">Every output repo ships a <code>BACKEND-GAPS.md</code>. Server-side things
+  (RLS policies, edge functions, triggers, auth user data) are invisible from the client —
+  so they're listed with manual migration steps, never silently invented. From the fixture run:</p>
+  <div class="gaps" id="gapsDiv">loading…</div>
+</section>
+
+<section>
+  <h2>Verify report</h2>
+  <p class="sub">The real verify output from the fixture run — screenshot diffs plus contract tests:</p>
+  <pre class="code" id="verifyPre">loading…</pre>
+</section>
+
+<section>
+  <h2>Try it</h2>
+  <p class="sub">v1 targets <code>*.lovable.app</code>. Unvibe only processes apps you own —
+  <code>--i-own-this</code> or an interactive attestation is required.</p>
+  <pre class="code">npx unvibe run \
+  --url https://your-app.lovable.app \
+  --i-own-this \
+  --work-dir ./my-rebuild \
+  --llm-provider openai --model gpt-4o-mini   # UNVIBE_API_KEY, or: --llm-provider mock
+
+cd my-rebuild/repo
+cp .env.example .env   # your keys, your instances
+npm install &amp;&amp; npm run dev
+docker compose up -d   # self-hosted Postgres</pre>
+</section>
+
+<footer>
+  Unvibe · <a href="https://github.com/TamTunnel/unvibe">TamTunnel/unvibe</a> · Apache-2.0<br>
+  Demo artifacts are real output from the synthetic fixture app
+  (<code>fixtures/fixture-app</code>), rebuilt with the deterministic mock provider.
+</footer>
+
+<script>
+// Minimal markdown-ish rendering for the gaps sample (no build step, no deps).
+async function load(id, url, render) {
+  try {
+    const t = await (await fetch(url)).text();
+    document.getElementById(id).innerHTML = render(t);
+  } catch (e) {
+    document.getElementById(id).textContent = 'could not load ' + url;
+  }
+}
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+load('specPre', 'assets/spec-sample.json', (t) => esc(t));
+// Render first ~6 gap sections of BACKEND-GAPS.md simply.
+load('gapsDiv', 'assets/BACKEND-GAPS-sample.md', (t) => {
+  const lines = t.split('\n');
+  let html = '', inList = false;
+  let sections = 0;
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      if (++sections > 4) break;
+      if (inList) { html += '</ul>'; inList = false; }
+      const title = esc(line.slice(3).replace(/^\d+\.\s*/, ''));
+      html += `<h4>${title}</h4>`;
+    } else if (/^\d+\.\s/.test(line)) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${esc(line.replace(/^\d+\.\s*/, ''))}</li>`;
+    } else if (line.trim() && !line.startsWith('#') && !line.startsWith('>') && !line.startsWith('---')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<p>${esc(line)}</p>`;
+    }
+  }
+  if (inList) html += '</ul>';
+  return html + '<p><i>…plus storage, payment, and secret gaps — see the full file.</i></p>';
+});
+load('verifyPre', 'assets/verify-report-sample.md', (t) => esc(t));
+</script>
+</body>
+</html>
