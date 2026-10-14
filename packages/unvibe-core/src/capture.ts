@@ -177,20 +177,31 @@ export async function captureSite(opts: CaptureOptions): Promise<CaptureResult> 
       // Lightweight DOM inventory sidecar for analyze (tag counts + text samples).
       // Behavioral only — no script contents, no bundle text.
       const domInventory = await page.$$eval(
-        'nav,h1,h2,h3,form,input,textarea,select,button,ul,ol,table,img,video,footer,dialog,section,article',
+        'nav,h1,h2,h3,form,input,textarea,select,button,ul,ol,table,img,video,footer,dialog',
         (els) => {
+          const textOf = (el: Element): string => {
+            const parts: string[] = [];
+            const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            let n: Node | null;
+            while ((n = walker.nextNode())) {
+              const t = (n.textContent ?? '').trim().replace(/\s+/g, ' ');
+              if (t) parts.push(t);
+            }
+            return parts.join(' | ').slice(0, 400);
+          };
           const groups = new Map<string, { count: number; text: string }>();
           for (const el of els) {
             const tag = el.tagName.toLowerCase();
+            // Skip elements nested inside an already-inventoried ancestor of the same tag.
             const g = groups.get(tag) ?? { count: 0, text: '' };
             g.count++;
-            if (g.text.length < 200) {
-              const t = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
-              if (t && !g.text.includes(t)) g.text = (g.text + ' | ' + t).slice(0, 200);
+            const t = textOf(el);
+            if (t && g.text.length < 400 && !g.text.includes(t)) {
+              g.text = (g.text ? g.text + ' || ' : '') + t;
             }
             groups.set(tag, g);
           }
-          return [...groups.entries()].map(([tag, g]) => ({ tag, count: g.count, text: g.text }));
+          return [...groups.entries()].map(([tag, g]) => ({ tag, count: g.count, text: g.text.slice(0, 400) }));
         },
       ).catch(() => [] as { tag: string; count: number; text: string }[]);
       const domDir = join(absOut, 'dom');

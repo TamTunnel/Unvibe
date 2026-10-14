@@ -1,0 +1,146 @@
+{
+  "specVersion": "1.0.0",
+  "source": {
+    "platform": "lovable",
+    "url": "http://localhost:8901/",
+    "capturedAt": "2026-10-14T03:09:52.867Z",
+    "unvibeVersion": "0.1.0"
+  },
+  "ownership": {
+    "attestedAt": "2026-10-14T03:09:49.489Z",
+    "method": "flag"
+  },
+  "routes": [
+    {
+      "path": "/",
+      "title": "Fixture Home",
+      "components": [
+        {
+          "name": "navbar-nav",
+          "kind": "navbar",
+          "text": "Home | About | Dashboard"
+        },
+        {
+          "name": "heading-h1",
+          "kind": "heading",
+          "text": "Fixture Home"
+        },
+        {
+          "name": "list-ul",
+          "kind": "list",
+          "text": "Alpha (12 stars) | Beta (7 stars)"
+        }
+      ]
+    },
+    {
+      "path": "/about",
+      "title": "About",
+      "components": [
+        {
+          "name": "navbar-nav",
+          "kind": "navbar",
+          "text": "Home | About | Dashboard"
+        },
+        {
+          "name": "heading-h1",
+          "kind": "heading",
+          "text": "About"
+        }
+      ]
+    },
+    {
+      "path": "/dashboard",
+      "title": "Dashboard",
+      "components": [
+        {
+          "name": "navbar-nav",
+          "kind": "navbar",
+          "text": "Home | About | Dashboard"
+        },
+        {
+          "name": "heading-h1",
+          "kind": "heading",
+          "text": "Dashboard"
+        },
+        {
+          "name": "form-form",
+          "kind": "form",
+          "text": "Send"
+        },
+        {
+          "name": "input-input",
+          "kind": "input",
+          "text": ""
+        },
+        {
+          "name": "button-button",
+          "kind": "button",
+          "text": "Send"
+        }
+      ]
+    }
+  ],
+  "endpoints": [
+    {
+      "method": "GET",
+      "urlPattern": "/api/projects",
+      "origin": "har"
+    },
+    {
+      "method": "GET",
+      "urlPattern": "/api/contact",
+      "origin": "bundle"
+    }
+  ],
+  "entities": [
+    {
+      "name": "Rojects",
+      "tableName": "projects",
+      "fields": [
+        "id:uuid",
+        "name:string",
+        "stars:number",
+        "created_at:date",
+        "public:boolean"
+      ],
+      "source": "har-payload"
+    }
+  ],
+  "auth": {
+    "provider": "supabase",
+    "evidence": [
+      "bundle: supabase marker strings"
+    ]
+  },
+  "gaps": [
+    {
+      "category": "rls-policy",
+      "title": "Supabase Row Level Security policies not recovered"
+    },
+    {
+      "category": "auth-config",
+      "title": "Auth configuration and user data not migrated"
+    },
+    {
+      "category": "edge-function",
+      "title": "Edge/serverless functions not recovered"
+    },
+    {
+      "category": "database-trigger",
+      "title": "Database triggers and scheduled jobs not recovered"
+    },
+    {
+      "category": "storage-bucket",
+      "title": "Storage bucket configs not recovered"
+    },
+    {
+      "category": "secret",
+      "title": "Secrets and API keys not migrated"
+    }
+  ],
+  "stats": {
+    "pagesVisited": 3,
+    "requestsCaptured": 9,
+    "scriptsAnalyzed": 3
+  }
+}

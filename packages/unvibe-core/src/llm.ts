@@ -174,11 +174,18 @@ function renderFromSpec(
     const blocks = (route.components ?? [])
       .map((c) => {
         const cls = c.kind === 'hero' ? 'hero' : c.kind === 'navbar' ? 'navbar' : c.kind;
-        const inner = (c.text ?? c.name).replace(/</g, '&lt;').slice(0, 300);
-        if (c.kind === 'button') return `      <button className="btn">${inner}</button>`;
-        if (c.kind === 'heading' || c.kind === 'hero') return `      <h1 className="${cls}">${inner}</h1>`;
-        if (c.kind === 'form' || c.kind === 'input') return `      <form className="${cls}" onSubmit={(e) => e.preventDefault()}><input placeholder="${inner}" /></form>`;
-        return `      <section className="${cls}" aria-label="${c.name.replace(/"/g, '')}">${inner}</section>`;
+        // DOM inventory joins observed text samples with " | " — split them back out.
+        const segments = (c.text ?? c.name).split(/\s*\|\|?\s*/).map((s) => s.replace(/</g, '&lt;').trim()).filter(Boolean).slice(0, 12);
+        const label = c.name.replace(/"/g, '');
+        const renderSeg = (inner: string): string => {
+          if (c.kind === 'button') return `      <button className="btn">${inner}</button>`;
+          if (c.kind === 'heading' || c.kind === 'hero') return `      <h1 className="${cls}">${inner}</h1>`;
+          if (c.kind === 'form' || c.kind === 'input') return `      <form className="${cls}" onSubmit={(e) => e.preventDefault()}><input placeholder="${inner}" /></form>`;
+          if (c.kind === 'navbar') return `      <span className="nav-link">${inner}</span>`;
+          return `      <p>${inner}</p>`;
+        };
+        const inner = segments.map(renderSeg).join('\n');
+        return `      <section className="${cls}" aria-label="${label}">\n${inner}\n      </section>`;
       })
       .join('\n');
     return `${header}export default function ${name}() {\n  return (\n    <main>\n${blocks || '      <p>Empty page</p>'}\n    </main>\n  );\n}\n`;

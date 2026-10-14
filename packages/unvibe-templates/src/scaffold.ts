@@ -348,6 +348,10 @@ const INDEX_CSS = `@tailwind base;
 .input { @apply rounded-md border border-slate-300 px-3 py-2 text-sm; }
 .app-nav { @apply flex gap-4 border-b border-slate-200 bg-white px-6 py-3; }
 .app-nav a { @apply text-sm font-medium text-slate-700 hover:text-slate-900; }
+.navbar { @apply flex flex-wrap gap-x-4 gap-y-1; }
+.nav-link { @apply mr-1 text-sm; }
+.hero { @apply py-6; }
+section p { @apply my-1; }
 `;
 
 const MAIN_TSX = `import React from "react";

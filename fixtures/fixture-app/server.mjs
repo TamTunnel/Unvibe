@@ -10,7 +10,7 @@
  */
 import http from 'node:http';
 
-const PORT = Number(process.env.FIXTURE_PORT ?? 8901);
+const PORT = Number(process.env.FIXTURE_PORT ?? 0); // 0 = ephemeral; tests parse the real port from stdout
 
 // Obviously-fake placeholder credentials (never realistic-looking).
 const FAKE_SUPABASE_URL = 'https://example-test.supabase.co';
@@ -95,4 +95,8 @@ const server = http.createServer((req, res) => {
   res.end('not found');
 });
 
-server.listen(PORT, () => console.log(`fixture-app listening on http://localhost:${PORT}`));
+server.listen(PORT, () => {
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : PORT;
+  console.log(`fixture-app listening on http://localhost:${port}`);
+});

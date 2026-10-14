@@ -7,7 +7,7 @@ import { runPipeline, stagePaths } from '../src/pipeline.js';
 import { contractTests } from '@tamtunnel/unvibe-verify';
 
 const FIXTURE = new URL('../../../fixtures/fixture-app/server.mjs', import.meta.url);
-const PORT = 8902;
+
 
 /**
  * Full pipeline e2e against the synthetic fixture app:
@@ -17,16 +17,15 @@ const PORT = 8902;
 describe('pipeline e2e (fixture app, mock LLM)', () => {
   let proc: ChildProcess;
   let workDir: string;
+  let port = 0;
 
   beforeAll(async () => {
-    proc = spawn('node', [FIXTURE.pathname], {
-      env: { ...process.env, FIXTURE_PORT: String(PORT) },
-      stdio: 'pipe',
-    });
+    proc = spawn('node', [FIXTURE.pathname], { stdio: 'pipe' });
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('fixture app did not start')), 15000);
       proc.stdout?.on('data', (d: Buffer) => {
-        if (d.toString().includes('listening')) { clearTimeout(t); resolve(); }
+        const m = d.toString().match(/listening on http:\/\/localhost:(\d+)/);
+        if (m) { port = Number(m[1]); clearTimeout(t); resolve(); }
       });
       proc.on('error', reject);
     });
@@ -39,7 +38,7 @@ describe('pipeline e2e (fixture app, mock LLM)', () => {
 
   it('runs capture → analyze → regenerate and produces an honest output repo', async () => {
     const { spec, verifyPass } = await runPipeline({
-      url: `http://localhost:${PORT}/`,
+      url: `http://localhost:${port}/`,
       workDir,
       ownership: { attestedAt: new Date().toISOString(), method: 'flag' },
       llm: { provider: 'mock', model: 'mock-spec-codegen-v1' },

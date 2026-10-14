@@ -6,21 +6,19 @@ import { join } from 'node:path';
 import { captureSite } from '../src/capture.js';
 
 const FIXTURE = new URL('../../../fixtures/fixture-app/server.mjs', import.meta.url);
-const PORT = 8901;
 
 describe('capture (Playwright, deterministic)', () => {
   let proc: ChildProcess;
   let outDir: string;
+  let port = 0;
 
   beforeAll(async () => {
-    proc = spawn('node', [FIXTURE.pathname], {
-      env: { ...process.env, FIXTURE_PORT: String(PORT) },
-      stdio: 'pipe',
-    });
+    proc = spawn('node', [FIXTURE.pathname], { stdio: 'pipe' });
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('fixture app did not start')), 15000);
       proc.stdout?.on('data', (d: Buffer) => {
-        if (d.toString().includes('listening')) { clearTimeout(t); resolve(); }
+        const m = d.toString().match(/listening on http:\/\/localhost:(\d+)/);
+        if (m) { port = Number(m[1]); clearTimeout(t); resolve(); }
       });
       proc.on('error', reject);
     });
@@ -33,7 +31,7 @@ describe('capture (Playwright, deterministic)', () => {
 
   it('crawls routes, screenshots, HAR, and downloads scripts', async () => {
     const result = await captureSite({
-      url: `http://localhost:${PORT}/`,
+      url: `http://localhost:${port}/`,
       outDir,
       maxPages: 10,
       onProgress: () => {},
